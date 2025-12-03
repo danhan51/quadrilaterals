@@ -1,15 +1,16 @@
 # Functions for extracting relevant data from behavioral files
 import pandas as pd
+import numpy as np
 
 EVENT_CODES_TO_EVENT_NAME = {
     9: 'trial_start',
-    18: 'trial_end',
+    18: 'trial_end_ml2', #trial end by ml2 (after blue idle screen flashes)
     10: 'fix_cue',
-    20: 'sample',
+    20: 'sample_on',
     21: 'sample_off',
     49: 'timeout',
     50: 'rew', 
-    51: 'trialend'
+    51: 'trial_end_blue' #trial ends, and blue idle screen flashes
 }
 
 class Quads:
@@ -22,13 +23,14 @@ class Quads:
         self.prettyBeh = self.generatePrettyBehDF()
         self.prettyNeural = self.generatePrettyNeuralDF()
 
+
     
     def generatePrettyBehDF(self):
         """
         Flattens beh data into something workable
         """
         trial_nums = [int(t.split('Trial')[1]) for t in self.dat.keys() if (t.startswith('Trial') and t != 'TrialRecord')]
-        df_columns = ['trial_ml2','stim_index','stim_presented','fixation_success_binary']
+        df_columns = ['trial_ml2','stim_index','stim_name','fixation_success_binary']
         df = pd.DataFrame(columns = df_columns)
         stim_index = 0 #unique index for each stim in this session
         for trial in trial_nums:
@@ -38,7 +40,7 @@ class Quads:
                     {
                         'trial_ml2':trial,
                         'stim_index': stim_index,
-                        'stim_presented':stim,
+                        'stim_name':stim,
                         'fixation_success_binary':success
                     }
                 ])
@@ -52,9 +54,84 @@ class Quads:
         beh_codes = self.neural.epocs.SMa1.data
         ons = self.neural.epocs.SMa1.onset
         offs = self.neural.epocs.SMa1.offset
-        df_columns = ['stim_index','on','off']
+        df_columns = ['trial_ml2','stim_index','code_type','on','off'] #trial calculated by num 9's
+        df = pd.DataFrame(columns = df_columns)
+        trial_counter = 0
+        stim_counter = 0
         for code,on,off in zip(beh_codes,ons,offs):
-            print('meow')
+            if code in range(102,132):
+                continue
+            elif code == 9:
+                trial_counter += 1
+                stim_index = np.nan
+            elif code == 20:
+                stim_index = stim_counter
+                stim_counter += 1
+            else:
+                stim_index = np.nan
+            code_type = EVENT_CODES_TO_EVENT_NAME[code]
+            new_entry = pd.DataFrame([
+                {
+                    'trial_ml2': trial_counter,
+                    'stim_index': stim_index,
+                    'code_type': code_type,
+                    'on': on,
+                    'off': off
+                }
+            ])
+            df = pd.concat([df,new_entry], ignore_index=True)
+        return df
+
+    def getEphysStreamTrange(self,trange):
+        """
+        Probbaly dont need this, maybe for LFP?
+        Pull out ephys data for given time range
+        RSn2 = ch 1-256
+        RSn3 = ch 257-512
+        trange = tuple (start,end) seconds
+        """
+        n = self.neural
+
+        rs2_streams = np.array(n.streams.RSn2.data)
+        rs2_channels = np.array(n.streams.RSn2.channels)
+        rs2_fs = n.streams.RSn2.fs
+        rs2_start = n.streams.RSn2.start_time
+
+        rs3_streams = np.array(n.streams.RSn3.data)
+        rs3_channels = np.array(n.streams.RSn3.channels)
+        rs3_fs = n.streams.RSn3.fs
+        rs3_start = n.streams.RSn3.start_time
+
+        assert rs2_start == rs3_start == 0, 'why neural start time not 0?'
+        assert rs2_fs == rs3_fs, 'why neural fs different?'
+
+        fs = rs2_fs
+
+        sample_start = int(np.floor(trange[0]*fs))
+        sample_end = int(np.ceil(trange[1]*fs))
+        stream_times = np.linspace(sample_start/fs,sample_end/fs,sample_end-sample_start + 1)
+        #for sanity
+        assert stream_times[0] <= trange[0]
+        assert stream_times[-1] >= trange[-1]
+
+
+        data_by_channel_dict = {}
+        data_by_channel_dict['time'] = stream_times
+        for channel in range (1,513):
+            if channel < 257:
+                stream = rs2_streams[np.where(rs2_channels == channel)[0][0],sample_start:sample_end + 1]
+                data_by_channel_dict[channel] = stream
+            elif channel >= 257:
+                stream = rs3_streams[np.where(rs2_channels == (channel - 256))[0][0],sample_start:sample_end + 1]
+                data_by_channel_dict[channel] = stream
+        print(data_by_channel_dict.keys())
+        return data_by_channel_dict
+
+    def photodiodeAnalogToBinary(self):
+        """
+        Gets photodiode trigger times to align with neural events later
+        """
+        pd_analog = self.neural.streams.PhD2.data
 
     def getListStimNames(self, trial_ml2):
         """

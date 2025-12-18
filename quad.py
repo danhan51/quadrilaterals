@@ -40,27 +40,14 @@ def loadQuad(animal, date):
 def filter_df(df: pd.DataFrame, filter_dict: dict) -> pd.DataFrame:
     """
     Filter a DataFrame based on a dictionary of allowed values.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        The DataFrame to filter.
-    filter_dict : dict
-        Keys are column names (str), values are lists of allowed values.
-
-    Returns
-    -------
-    pd.DataFrame
-        A filtered DataFrame.
     """
     
-    mask = pd.Series(True, index=df.index)  # start with all rows
+    mask = pd.Series(True, index=df.index)
 
     for col, allowed_vals in filter_dict.items():
         if col not in df.columns:
             raise KeyError(f"Column '{col}' not found in DataFrame.")
         
-        # Update mask
         mask &= df[col].isin(allowed_vals)
 
     return df[mask]

@@ -142,6 +142,9 @@ class Quads:
 
         self.Dat = self.mergeBehTdt()
 
+        #sanity check make sure isi correlated btwn beh and tdt times
+        self.checkISI()
+
     
     
     ### LOAD DATA
@@ -282,8 +285,8 @@ class Quads:
         for session_index, dat in enumerate(self.ml2_dat_list):
             trial_nums = [int(t.split('Trial')[1]) for t in dat.keys() if (t.startswith('Trial') and t != 'TrialRecord')]
             for trial in trial_nums:
-                stim,success_fail = self.getWhatStimEachPresentation(session_index,trial)
-                for stim,success in zip(stim,success_fail):
+                stim_list,stim_code_times,success_fail_list = self.getWhatStimEachPresentation(session_index,trial)
+                for stim,time,success in zip(stim_list,stim_code_times,success_fail_list):
                     new_entry = pd.DataFrame([
                         {
                             'beh_session': int(session_index),
@@ -292,7 +295,8 @@ class Quads:
                             'stim_index': int(stim_index), #unique index for each stim presentation, counts over sessions
                             'condition': int(dat[f'Trial{trial}']['Condition']),
                             'stim_name':stim,
-                            'fixation_success_binary':success
+                            'fixation_success_binary':success,
+                            'ml2_time': time/100
                         }
                     ])
                     df = pd.concat([df,new_entry], ignore_index=True)
@@ -357,6 +361,7 @@ class Quads:
         merge = pd.merge(beh,tdt, on='stim_index')
         merge = merge.drop('trial_ml2_y', axis = 1)
         merge = merge.rename(columns={'trial_ml2_x':'trial_ml2'}) #better trial keeping
+
         
         return merge
 
@@ -856,8 +861,12 @@ class Quads:
 
         dat_trial = self.ml2_dat_list[session][f'Trial{trial_ml2}']
         stim_list = self.getListStimNames(session,trial_ml2)
-        beh_codes = dat_trial['BehavioralCodes']['CodeNumbers']
+        beh_codes = np.array(dat_trial['BehavioralCodes']['CodeNumbers'])
+        beh_code_times = dat_trial['BehavioralCodes']['CodeTimes']
+        mask = (beh_codes >= 102) & (beh_codes <= 131)
+        stim_code_times = beh_code_times[mask]
         stim_codes = [c%100 for c in beh_codes if 102 <= c <= 131]
+        assert len(stim_code_times) == len(stim_codes), 'why diff?'
         stim_success_fail = [c != stim_codes[i+1] for i,c in enumerate(stim_codes) if i < len(stim_codes)-1]
         stim_each_present = [stim_list[c-2] for c in stim_codes]
         if len(stim_each_present) > 0:
@@ -896,7 +905,7 @@ class Quads:
                         assert np.all(stim_bin_list == stim_success_fail)
 
 
-        return stim_each_present, stim_success_fail
+        return stim_each_present, stim_code_times, stim_success_fail
     
     def AlignBehWithNeuralData(self, trial_ml2):
         """
@@ -984,6 +993,42 @@ class Quads:
             assert np.isclose(rs2_dur,rs3_dur,atol=0.0015)
             avg_durs.append(np.mean([rs2_dur,rs3_dur]))
         return avg_durs
+    
+    def checkISI(self, min_events=12):
+        """
+        For each trial in trial_ml2, compute the correlation between
+        successive time differences in ml2_time and photodiode_time.
+
+        Args:
+            min_events (int): minimum number of events in a trial to evaluate
+        Returns:
+            dict: trial_id -> correlation coefficient (np.nan if not computable)
+        """
+
+        for trial, df_t in self.Dat.groupby(['trial_ml2','beh_session']):
+            # drop rows with missing times
+            df_t = df_t[['ml2_time', 'photodiode_time']]
+
+            #short trials not great corr
+            if len(df_t) < min_events:
+                corr = np.nan
+                continue
+
+            df_t = df_t.sort_values('ml2_time')
+
+            d_ml2 = np.diff(df_t['ml2_time'].values)
+            d_pd  = np.diff(df_t['photodiode_time'].values)
+
+
+            corr = np.corrcoef(d_ml2, d_pd)[0, 1]
+
+            if np.abs(corr) < 0.99:
+                print('Low isi correlation for this trial')
+                print(trial,':',corr)
+                print('ISIs')
+                for x,y in zip(d_ml2,d_pd):
+                    print(x,y)
+                assert False
 
 
         

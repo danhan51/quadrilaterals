@@ -29,7 +29,7 @@ def loadQuad(animal, date):
     basedir = '/home/danhan/code/data/quad_data'
     paths = {
     'ml2_dir': f'{basedir}/{animal}/behavior/{date}',
-    'conditions_dir': f'{basedir}/{animal}/conditions_quadrilaterals_{subject}.txt', 
+    # 'conditions_dir': f'{basedir}/{animal}/conditions_quadrilaterals_{subject}.txt', 
     'tdt_dir': f'{basedir}/{animal}/tdt/{date}',
     'spikes_dir': f'{basedir}/{animal}/spikes_postprocess/{date}/DATSTRUCT_CLEAN_MERGED.mat'
     }
@@ -127,7 +127,7 @@ class Quads:
         #mostly internal attrs
         self._session_rec_names = None
         self.ml2_dat_list = self.loadML2Data()              # dict with all trial info (convert bhv2 to mat)
-        self.conditions = self.loadCondtionsFile() # conditions file loaded from text as pd df
+        # self.conditions = self.loadCondtionsFile() # conditions file loaded from text as pd df
         self.tdt_dat_list = self.loadTdtData()
         self._session_durations = self.getSessionDurations()
         
@@ -201,6 +201,7 @@ class Quads:
         """
         Function to load the condtions file as df for getting stim names
         """
+        assert False, 'old method dont use'
         with open(self.paths['conditions_dir'], 'r') as f:
             conditions = pd.read_csv(f, delimiter = '\t')
         return conditions
@@ -838,16 +839,15 @@ class Quads:
         inputs:
         trial (int): monkeylogic (1 indexed) trial num
         """
-
-        dat_trial = self.ml2_dat_list[session][f'Trial{trial_ml2}']
-        condition_num = dat_trial['Condition']
-        conds = self.conditions
         stim_list = []
-        for i in range (2,32):
-            stim_full = conds.loc[conds['Condition'] == condition_num, f'TaskObject#{i}'].iloc[0]
-            stim = stim_full.split('/')[1].split(')')[0].split(',')[0]
-            stim_list.append(stim)
+        task_objects = self.ml2_dat_list[session][f'Trial{trial_ml2}']['TaskObject']['Attribute']
+        for obj in task_objects:
+            if obj[0] == 'pic':
+                stim_path = obj[1]
+                stim_name = stim_path.rsplit('\\')[-1].split('.')[0]
+                stim_list.append(stim_name)
         return stim_list
+        
     
     def getWhatStimEachPresentation(self, session, trial_ml2):
         """
